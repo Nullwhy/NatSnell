@@ -13,7 +13,7 @@ CYAN='\033[0;36m'
 RESET='\033[0m'
 
 # 当前版本号
-current_version="5.8"
+current_version="5.9"
 
 # 全局变量：选择的 Snell 版本
 SNELL_VERSION_CHOICE=""
@@ -265,12 +265,14 @@ view_snell_config() {
     echo -e "Snell PSK 密钥 : ${YELLOW}${SNELL_PSK}${RESET}"
     echo -e "Snell 协议版本 : ${YELLOW}${SNELL_VER}${RESET}"
 
-    # 解析 ShadowTLS 配置（如果安装了的话）
+    # 解析 ShadowTLS 配置（精准匹配模式）
     if [ -f "/etc/systemd/system/shadowtls.service" ]; then
         STLS_CMD=$(grep -E '^ExecStart' /etc/systemd/system/shadowtls.service)
-        STLS_PORT=$(echo "$STLS_CMD" | grep -oP '--listen\s+[^\s]+' | awk '{print $2}' | awk -F':' '{print $NF}')
-        STLS_PWD=$(echo "$STLS_CMD" | grep -oP '--password\s+[^\s]+' | awk '{print $2}')
-        STLS_SNI=$(echo "$STLS_CMD" | grep -oP '--tls\s+[^\s]+' | awk '{print $2}' | cut -d':' -f1)
+        
+        # 精准提取监听端口、密码和伪装 SNI
+        STLS_PORT=$(echo "$STLS_CMD" | sed -n 's/.*--listen [^:]*:\([0-9]*\).*/\1/p')
+        STLS_PWD=$(echo "$STLS_CMD" | sed -n 's/.*--password \([^ ]*\).*/\1/p')
+        STLS_SNI=$(echo "$STLS_CMD" | sed -n 's/.*--tls \([^:]*\):.*/\1/p')
         [ -z "$STLS_SNI" ] && STLS_SNI="one-piece.com"
 
         echo -e "${CYAN}----------------------------------------${RESET}"
