@@ -1,27 +1,14 @@
 [中文](README.md) 
 
-# Snell 一键脚本
+# 只适用于在 Linux 终端（VPS / LXC）中运行
+
+# NatSnell 一键脚本
 
 bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)
 
 ### ShadowTLS 说明
 
 在脚本中为 Snell 配置 ShadowTLS 后，脚本会把 Snell 后端改为仅监听 `127.0.0.1:Snell端口`，客户端只连接 ShadowTLS 对外端口。这样可以避免原始 Snell 端口继续暴露在公网。
-
-
-| 标签 | 版本 | 说明 |
-|------|------|------|
-| `latest` | Snell v5.0.1 | 固定指向 v5，不指向 v6 |
-| `v4` | Snell v4.1.1 | v4 当前推荐版本 |
-| `v5` | Snell v5.0.1 | v5 当前推荐版本 |
-| `v6` | Snell v6.0.0b4 | v6 当前 Beta 版本 |
-| `v4.0.0` / `v4.0.1` / `v4.1.0` / `v4.1.1` | Snell v4 | 固定版本标签 |
-| `v5.0.0` / `v5.0.1` | Snell v5 | 固定版本标签 |
-| `v6.0.0b1` / `v6.0.0b2` / `v6.0.0b3` / `v6.0.0b4` | Snell v6 beta | 固定版本标签 |
-
-架构支持：
-- v4 / v5: `linux/amd64`、`linux/arm64`、`linux/arm/v7`
-- v6: `linux/amd64`、`linux/arm64`
 
 
 客户端填写：
