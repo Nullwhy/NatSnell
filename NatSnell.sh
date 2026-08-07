@@ -14,7 +14,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
-current_version="1.0"
+current_version="1.1"
 SNELL_VERSION="5"
 
 check_status() {
@@ -26,6 +26,10 @@ check_status() {
     else
         echo -e "${YELLOW}◌ 未安装${RESET}"
     fi
+}
+
+get_current_dns() {
+    grep -m1 '^nameserver' /etc/resolv.conf 2>/dev/null | awk '{print $2}' || echo "未知"
 }
 
 create_shortcut() {
@@ -73,6 +77,37 @@ get_public_ip() {
     PUB_IP=$(curl -s4 https://api.ipify.org || curl -s4 https://ip.sb || echo "你的公网IP")
 }
 
+set_system_dns() {
+    echo -e "\n${CYAN}[+] 修改系统 DNS 解析服务器：${RESET}"
+    echo -e "  1. Google DNS (8.8.8.8 / 8.8.4.4)"
+    echo -e "  2. Cloudflare DNS (1.1.1.1 / 1.0.0.1)"
+    echo -e "  3. Quad9 DNS (9.9.9.9 / 149.112.112.112)"
+    echo -e "  4. 自定义 DNS"
+    echo -e "  0. 返回主菜单"
+    read -rp "  请选择 [0-4]: " dns_choice
+
+    case "$dns_choice" in
+        1) dns1="8.8.8.8"; dns2="8.8.4.4" ;;
+        2) dns1="1.1.1.1"; dns2="1.0.0.1" ;;
+        3) dns1="9.9.9.9"; dns2="149.112.112.112" ;;
+        4)
+            read -rp "  请输入首选 DNS (例如 8.8.8.8): " dns1
+            read -rp "  请输入备用 DNS (可选，留空跳过): " dns2
+            ;;
+        0) return ;;
+        *) echo -e "  ${RED}❌ 输入无效${RESET}"; return ;;
+    esac
+
+    if [ -n "$dns1" ]; then
+        chattr -i /etc/resolv.conf 2>/dev/null
+        cat <<EOF > /etc/resolv.conf
+nameserver $dns1
+EOF
+        [ -n "$dns2" ] && echo "nameserver $dns2" >> /etc/resolv.conf
+        echo -e "  ${GREEN}✓ 系统 DNS 已成功修改为: $dns1 ${dns2:+$dns2}${RESET}"
+    fi
+}
+
 install_snell() {
     auto_update_script
     install_dependencies
@@ -110,16 +145,28 @@ install_snell() {
 [snell-server]
 listen = ${LISTEN_ADDR}:${SNELL_PORT}
 psk = ${SNELL_PSK}
-ipv6 = ${IPV6_ENABLE}
 version = ${SNELL_VERSION}
 EOF
+
+    # 修复：v6 版本不再写入 ipv6 字段
+    if [ "$SNELL_VERSION" != "6" ]; then
+        echo "ipv6 = ${IPV6_ENABLE}" >> "$SNELL_CONF_DIR/snell-server.conf"
+    fi
 
     ARCH=$(uname -m)
     ARCH_TYPE="amd64"
     [ "$ARCH" = "aarch64" ] && ARCH_TYPE="aarch64"
 
-    echo -e "  ${CYAN}下载 Snell 服务端...${RESET}"
-    DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-${ARCH_TYPE}.zip"
+    # 修复：根据选择动态分配正确的下载地址
+    if [ "$SNELL_VERSION" = "4" ]; then
+        DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-${ARCH_TYPE}.zip"
+    elif [ "$SNELL_VERSION" = "5" ]; then
+        DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v5.0.1-linux-${ARCH_TYPE}.zip"
+    elif [ "$SNELL_VERSION" = "6" ]; then
+        DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v6.0.0b4-linux-${ARCH_TYPE}.zip"
+    fi
+
+    echo -e "  ${CYAN}下载 Snell v${SNELL_VERSION} 服务端...${RESET}"
     wget -q -O /tmp/snell.zip "$DOWNLOAD_URL" || { echo -e "  ${RED}❌ 下载失败${RESET}"; return 1; }
     
     unzip -q -o /tmp/snell.zip -d /usr/local/bin/
@@ -149,7 +196,7 @@ EOF
     create_shortcut
 
     echo -e "\n${GREEN}=========================================================${RESET}"
-    echo -e "${GREEN}  ✓ Snell 服务安装并启动成功！${RESET}"
+    echo -e "${GREEN}  ✓ Snell v${SNELL_VERSION} 服务安装并启动成功！${RESET}"
     echo -e "  端口: ${YELLOW}${SNELL_PORT}${RESET} | PSK: ${YELLOW}${SNELL_PSK}${RESET}"
     echo -e "${GREEN}=========================================================${RESET}"
 }
@@ -301,17 +348,19 @@ show_menu() {
     
     printf "  %-22s : " "Snell 服务" ; check_status "snell"
     printf "  %-22s : " "ShadowTLS 伪装" ; check_status "shadowtls"
+    printf "  %-22s : ${YELLOW}%s${RESET}\n" "系统 DNS" "$(get_current_dns)"
     
     echo -e "${CYAN}---------------------------------------------------------${RESET}"
     echo -e "  ${GREEN}1.${RESET} 安装 / 重置 Snell"
     echo -e "  ${GREEN}2.${RESET} 安装 / 配置 ShadowTLS"
-    echo -e "  ${GREEN}3.${RESET} 卸载管理 (Snell / ShadowTLS)"
-    echo -e "  ${GREEN}4.${RESET} ${BOLD}查看配置 & 导出节点字符串${RESET}"
-    echo -e "  ${GREEN}5.${RESET} 重启所有服务"
-    echo -e "  ${GREEN}6.${RESET} 检查脚本更新"
+    echo -e "  ${GREEN}3.${RESET} ${BOLD}修改 / 优化系统 DNS${RESET}"
+    echo -e "  ${GREEN}4.${RESET} 卸载管理 (Snell / ShadowTLS)"
+    echo -e "  ${GREEN}5.${RESET} 查看配置 & 导出节点字符串"
+    echo -e "  ${GREEN}6.${RESET} 重启所有服务"
+    echo -e "  ${GREEN}7.${RESET} 检查脚本更新"
     echo -e "  ${RED}0.${RESET} 退出面板"
     echo -e "${CYAN}=========================================================${RESET}"
-    read -rp "  请选择操作 [0-6]: " num
+    read -rp "  请选择操作 [0-7]: " num
 }
 
 while true; do
@@ -319,10 +368,11 @@ while true; do
     case "$num" in
         1) install_snell; read -rp "  按回车键返回菜单..." ;;
         2) setup_shadowtls; read -rp "  按回车键返回菜单..." ;;
-        3) uninstall_menu; read -rp "  按回车键返回菜单..." ;;
-        4) view_snell_config; read -rp "  按回车键返回菜单..." ;;
-        5) restart_snell; read -rp "  按回车键返回菜单..." ;;
-        6) auto_update_script; read -rp "  按回车键返回菜单..." ;;
+        3) set_system_dns; read -rp "  按回车键返回菜单..." ;;
+        4) uninstall_menu; read -rp "  按回车键返回菜单..." ;;
+        5) view_snell_config; read -rp "  按回车键返回菜单..." ;;
+        6) restart_snell; read -rp "  按回车键返回菜单..." ;;
+        7) auto_update_script; read -rp "  按回车键返回菜单..." ;;
         0) echo -e "\n  ${GREEN}感谢使用 NatSnell，再见！${RESET}\n"; exit 0 ;;
         *) echo -e "  ${RED}❌ 请输入有效数字！${RESET}"; sleep 1 ;;
     esac
