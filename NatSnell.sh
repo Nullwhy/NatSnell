@@ -265,7 +265,7 @@ view_snell_config() {
         STLS_PORT=$(echo "$STLS_CMD" | sed -n 's/.*--listen [^:]*:\([0-9]*\).*/\1/p')
         STLS_PWD=$(echo "$STLS_CMD" | sed -n 's/.*--password \([^ ]*\).*/\1/p')
         STLS_SNI=$(echo "$STLS_CMD" | sed -n 's/.*--tls \([^:]*\):.*/\1/p')
-        [ -z "$STLS_SNI" ] && STLS_SNI="one-piece.com"
+        [ -z "$STLS_SNI" ] && STLS_SNI="microsoft.com"
 
         echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
         echo -e "  ShadowTLS 端口   : ${YELLOW}${STLS_PORT}${RESET} ${PURPLE}(NAT小鸡映射此端口)${RESET}"
@@ -299,8 +299,8 @@ setup_shadowtls() {
     read -rp "  请输入转发的目标 Snell 内部端口 [默认 50001]: " SNELL_PORT
     [ -z "$SNELL_PORT" ] && SNELL_PORT="50001"
 
-    read -rp "  请输入伪装域名 (SNI) [默认 one-piece.com]: " TLS_DOMAIN
-    [ -z "$TLS_DOMAIN" ] && TLS_DOMAIN="one-piece.com"
+    read -rp "  请输入伪装域名 (SNI) [默认 microsoft.com]: " TLS_DOMAIN
+    [ -z "$TLS_DOMAIN" ] && TLS_DOMAIN="microsoft.com"
 
     DEFAULT_STLS_PWD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
     read -rp "  请输入 ShadowTLS 密码 [默认随机: ${DEFAULT_STLS_PWD}]: " STLS_PWD
