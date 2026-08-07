@@ -148,7 +148,6 @@ psk = ${SNELL_PSK}
 version = ${SNELL_VERSION}
 EOF
 
-    # 修复：v6 版本不再写入 ipv6 字段
     if [ "$SNELL_VERSION" != "6" ]; then
         echo "ipv6 = ${IPV6_ENABLE}" >> "$SNELL_CONF_DIR/snell-server.conf"
     fi
@@ -157,7 +156,6 @@ EOF
     ARCH_TYPE="amd64"
     [ "$ARCH" = "aarch64" ] && ARCH_TYPE="aarch64"
 
-    # 修复：根据选择动态分配正确的下载地址
     if [ "$SNELL_VERSION" = "4" ]; then
         DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-${ARCH_TYPE}.zip"
     elif [ "$SNELL_VERSION" = "5" ]; then
@@ -342,8 +340,8 @@ EOF
 show_menu() {
     clear
     echo -e "${CYAN}=========================================================${RESET}"
-    echo -e "${BOLD}${PURPLE}          NatSnell 管理面板 v${current_version} (LXC / NAT)${RESET}"
-    echo -e "${BLUE}          GitHub: Nullwhy/NatSnell${RESET}"
+    echo -e "${BOLD}${GREEN}          NatSnell 管理面板 v${current_version} (LXC / NAT)${RESET}"
+    echo -e "${PURPLE}          GitHub: Nullwhy/NatSnell${RESET}"
     echo -e "${CYAN}=========================================================${RESET}"
     
     printf "  %-22s : " "Snell 服务" ; check_status "snell"
