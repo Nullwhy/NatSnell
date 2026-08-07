@@ -13,7 +13,7 @@ CYAN='\033[0;36m'
 RESET='\033[0m'
 
 # 当前版本号
-current_version="5.9"
+current_version="1.0"
 
 # 全局变量：选择的 Snell 版本
 SNELL_VERSION_CHOICE=""
@@ -282,11 +282,11 @@ view_snell_config() {
         echo -e "ShadowTLS SNI  : ${YELLOW}${STLS_SNI}${RESET}"
         echo -e "${CYAN}----------------------------------------${RESET}"
         echo -e "${GREEN}📱 Egern 节点配置字符串 (直接复制以下文本):${RESET}"
-        echo -e "${CYAN}NatSnell = snell, ${PUB_IP}, ${STLS_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, shadow-tls-password=${STLS_PWD}, shadow-tls-version=3, shadow-tls-sni=${STLS_SNI}, tfo=true${RESET}"
+        echo -e "${CYAN}NatSnell = snell,${PUB_IP}, ${STLS_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, shadow-tls-password=${STLS_PWD}, shadow-tls-version=3, shadow-tls-sni=${STLS_SNI}, tfo=true${RESET}"
     else
         echo -e "${CYAN}----------------------------------------${RESET}"
         echo -e "${YELLOW}未配置 ShadowTLS。直连 Egern 配置如下：${RESET}"
-        echo -e "${CYAN}NatSnell = snell, ${PUB_IP}, ${SNELL_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, tfo=true${RESET}"
+        echo -e "${CYAN}NatSnell = snell,${PUB_IP}, ${SNELL_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, tfo=true${RESET}"
     fi
     echo -e "${CYAN}========================================${RESET}"
 }
@@ -320,67 +320,4 @@ setup_shadowtls() {
     [ "$ARCH" = "aarch64" ] && STLS_ARCH="aarch64-unknown-linux-musl"
 
     echo -e "${CYAN}正在下载 ShadowTLS 二进制文件...${RESET}"
-    wget -O /usr/local/bin/shadow-tls "https://github.com/ihciah/shadow-tls/releases/latest/download/shadow-tls-${STLS_ARCH}" || { echo -e "${RED}下载失败${RESET}"; return 1; }
-    chmod +x /usr/local/bin/shadow-tls
-
-    # 写入干净的 Systemd 服务
-    cat <<EOF > /etc/systemd/system/shadowtls.service
-[Unit]
-Description=Shadow-TLS Service for Snell
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/shadow-tls --v3 server --listen 0.0.0.0:${STLS_PORT} --server 127.0.0.1:${SNELL_PORT} --tls ${TLS_DOMAIN}:443 --password ${STLS_PWD} --wildcard-sni authed
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reload
-    systemctl enable shadowtls
-    systemctl restart shadowtls
-
-    echo -e "${GREEN}ShadowTLS 配置成功并已启动！${RESET}"
-    view_snell_config
-}
-
-# === 菜单交互 ===
-show_menu() {
-    clear
-    echo -e "${CYAN}========================================${RESET}"
-    echo -e "${GREEN}   NatSnell 管理脚本 v${current_version} (LXC/NAT 优化版)${RESET}"
-    echo -e "   仓库: Nullwhy/NatSnell | 快捷指令: nsl"
-    echo -e "${CYAN}----------------------------------------${RESET}"
-    echo -n -e "   Snell 状态     : "; check_status "snell"
-    echo -n -e "   ShadowTLS 状态 : "; check_status "shadowtls"
-    echo -e "${CYAN}========================================${RESET}"
-    echo -e "${GREEN}1.${RESET} 安装 Snell"
-    echo -e "${GREEN}2.${RESET} 仅卸载 Snell"
-    echo -e "${GREEN}3.${RESET} 安装/配置 ShadowTLS"
-    echo -e "${GREEN}4.${RESET} 仅卸载 ShadowTLS"
-    echo -e "${GREEN}5.${RESET} 查看配置 & 导出 Egern 节点"
-    echo -e "${GREEN}6.${RESET} 重启 Snell / ShadowTLS 服务"
-    echo -e "${GREEN}7.${RESET} 检查脚本更新"
-    echo -e "${GREEN}0.${RESET} 退出脚本"
-    echo -e "${CYAN}========================================${RESET}"
-    read -rp "请输入数字 [0-7]: " num
-}
-
-# === 主循环 ===
-while true; do
-    show_menu
-    case "$num" in
-        1) install_snell; read -rp "按回车键继续..." ;;
-        2) uninstall_snell; read -rp "按回车键继续..." ;;
-        3) setup_shadowtls; read -rp "按回车键继续..." ;;
-        4) uninstall_shadowtls; read -rp "按回车键继续..." ;;
-        5) view_snell_config; read -rp "按回车键继续..." ;;
-        6) restart_snell; read -rp "按回车键继续..." ;;
-        7) auto_update_script; read -rp "按回车键继续..." ;;
-        0) exit 0 ;;
-        *) echo -e "${RED}请输入有效选项！${RESET}"; sleep 1 ;;
-    esac
-done
+    wget -O /usr/local/bin/shadow-tls "
