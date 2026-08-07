@@ -5,7 +5,6 @@
 # 描述: 用于快速部署与管理 Snell + ShadowTLS 节点
 # =========================================================
 
-# 定义颜色代码
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -19,7 +18,6 @@ current_version="1.0"
 SNELL_VERSION_CHOICE=""
 SNELL_VERSION=""
 
-# === 检测服务运行状态 ===
 check_status() {
     local service_name=$1
     if systemctl is-active --quiet "$service_name" 2>/dev/null; then
@@ -31,7 +29,6 @@ check_status() {
     fi
 }
 
-# === 选择 Snell 版本 ===
 select_snell_version() {
     echo -e "\n${CYAN}${BOLD}[+] 请选择要安装的 Snell 版本：${RESET}"
     echo -e "  ${GREEN}1.${RESET} Snell v4"
@@ -49,14 +46,12 @@ select_snell_version() {
     done
 }
 
-# === 写入快捷指令 ===
 create_shortcut() {
     echo '#!/bin/bash' > /usr/local/bin/nsl
     echo 'bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)' >> /usr/local/bin/nsl
     chmod +x /usr/local/bin/nsl
 }
 
-# === 自动更新脚本 ===
 auto_update_script() {
     echo -e "\n${CYAN}正在检查脚本更新...${RESET}"
     TMP_SCRIPT=$(mktemp)
@@ -80,7 +75,6 @@ auto_update_script() {
     fi
 }
 
-# === 检查网络环境 ===
 get_ipv6_choice() {
     IPV6_ENABLE="false"
     LISTEN_ADDR="0.0.0.0"
@@ -92,7 +86,6 @@ get_ipv6_choice() {
     esac
 }
 
-# === 安装依赖项 ===
 install_dependencies() {
     echo -e "\n${CYAN}正在安装基本依赖...${RESET}"
     if command -v apt-get &>/dev/null; then
@@ -102,12 +95,10 @@ install_dependencies() {
     fi
 }
 
-# === 获取公网 IP ===
 get_public_ip() {
     PUB_IP=$(curl -s4 https://api.ipify.org || curl -s4 https://ip.sb || echo "你的公网IP")
 }
 
-# === 安装 Snell 主程序 ===
 install_snell() {
     auto_update_script
     install_dependencies
@@ -152,4 +143,114 @@ Description=Snell Server Service
 After=network.target
 
 [Service]
-Type=
+Type=simple
+User=root
+ExecStart=/usr/local/bin/snell-server -c /etc/snell/snell-server.conf
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable snell >/dev/null 2>&1
+    systemctl restart snell
+
+    create_shortcut
+
+    echo -e "\n${GREEN}=========================================================${RESET}"
+    echo -e "${GREEN}  ✓ Snell 服务安装并启动成功！${RESET}"
+    echo -e "  端口: ${YELLOW}${SNELL_PORT}${RESET} \vert{} PSK:${YELLOW}${SNELL_PSK}${RESET}"
+    echo -e "${GREEN}=========================================================${RESET}"
+}
+
+do_uninstall_snell() {
+    echo -e "  ${YELLOW}正在清理并卸载 Snell...${RESET}"
+    systemctl stop snell 2>/dev/null
+    systemctl disable snell 2>/dev/null
+    rm -f /etc/systemd/system/snell.service
+    rm -rf /etc/snell
+    rm -f /usr/local/bin/snell-server
+    echo -e "  ${GREEN}✓ Snell 卸载完成！${RESET}"
+}
+
+do_uninstall_shadowtls() {
+    echo -e "  ${YELLOW}正在清理并卸载 ShadowTLS...${RESET}"
+    systemctl stop shadowtls 2>/dev/null
+    systemctl disable shadowtls 2>/dev/null
+    rm -f /etc/systemd/system/shadowtls.service
+    rm -f /usr/local/bin/shadow-tls
+    echo -e "  ${GREEN}✓ ShadowTLS 卸载完成！${RESET}"
+}
+
+clean_shortcut() {
+    if [ ! -f "/etc/systemd/system/snell.service" ] && [ ! -f "/etc/systemd/system/shadowtls.service" ]; then
+        rm -f /usr/local/bin/nsl /usr/local/bin/snell
+    fi
+}
+
+uninstall_menu() {
+    echo -e "\n${CYAN}┌───────────────────────────────────────────────────────┐${RESET}"
+    echo -e "${CYAN}│                   🗑️ 服务卸载管理                     │${RESET}"
+    echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
+    echo -e "  ${GREEN}1.${RESET} 仅卸载 Snell"
+    echo -e "  ${GREEN}2.${RESET} 仅卸载 ShadowTLS"
+    echo -e "  ${RED}3. 全部卸载并清理残留 (彻底删除脚本与服务)${RESET}"
+    echo -e "  ${CYAN}0.${RESET} 返回主菜单"
+    echo -e "${CYAN}└───────────────────────────────────────────────────────┘${RESET}"
+    read -rp "  请选择卸载选项 [0-3]: " un_choice
+
+    case "$un_choice" in
+        1)
+            do_uninstall_snell
+            clean_shortcut
+            systemctl daemon-reload
+            ;;
+        2)
+            do_uninstall_shadowtls
+            clean_shortcut
+            systemctl daemon-reload
+            ;;
+        3)
+            read -rp "  ⚠️ 确定要彻底清空 Snell 和 ShadowTLS 所有相关配置吗? [y/N]: " confirm
+            case "$confirm" in
+                [yY]|[yY][eE][sS])
+                    do_uninstall_snell
+                    do_uninstall_shadowtls
+                    rm -f /usr/local/bin/nsl /usr/local/bin/snell
+                    systemctl daemon-reload
+                    echo -e "  ${GREEN}✓ 已卸载所有服务，清理了全部快捷键与配置文件！${RESET}"
+                    ;;
+                *)
+                    echo -e "  ${YELLOW}已取消卸载操作。${RESET}"
+                    ;;
+            esac
+            ;;
+        0)
+            return 0
+            ;;
+        *)
+            echo -e "  ${RED}❌ 无效选项！${RESET}"
+            ;;
+    esac
+}
+
+view_snell_config() {
+    if [ ! -f "/etc/snell/snell-server.conf" ]; then
+        echo -e "\n${RED}❌ 未找到 Snell 配置文件，请先安装 Snell！${RESET}"
+        return 1
+    fi
+
+    SNELL_PSK=$(grep -E '^psk' /etc/snell/snell-server.conf | awk -F'=' '{print $2}' | tr -d ' ')
+    SNELL_PORT=$(grep -E '^listen' /etc/snell/snell-server.conf | sed -n 's/.*:\([0-9]*\)/\1/p')
+    SNELL_VER=$(grep -E '^version' /etc/snell/snell-server.conf | awk -F'=' '{print $2}' | tr -d ' ')
+    [ -z "$SNELL_VER" ] && SNELL_VER="5"
+
+    get_public_ip
+
+    echo -e "\n${CYAN}┌───────────────────────────────────────────────────────┐${RESET}"
+    echo -e "${CYAN}│               📊 当前节点配置卡片                     │${RESET}"
+    echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
+    printf "${CYAN}│${RESET}  \%-18s : " "公网 IP 地址" ; echo -e "${BOLD}${PUB_IP}${RESET}"
+    printf "${CYAN}│${RESET}  %-18s : " "Snell 内部端口" ; echo -e "${YELLOW}${SNELL_PORT
