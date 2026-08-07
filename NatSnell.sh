@@ -68,8 +68,7 @@ select_snell_version() {
 
 # === 写入快捷指令 /usr/local/bin/nsl ===
 create_shortcut() {
-    echo '#!/bin/bash' > /usr/local/bin/nsl
-    echo 'bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)' >> /usr/local/bin/nsl
+    printf '#!/bin/bash\nbash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)\n' > /usr/local/bin/nsl
     chmod +x /usr/local/bin/nsl
 }
 
@@ -276,11 +275,11 @@ view_snell_config() {
         echo -e "ShadowTLS SNI  : ${YELLOW}${STLS_SNI}${RESET}"
         echo -e "${CYAN}----------------------------------------${RESET}"
         echo -e "${GREEN}📱 Egern 节点配置字符串 (直接复制以下文本):${RESET}"
-        echo -e "${CYAN}NatSnell = snell, ${PUB_IP}, ${STLS_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, shadow-tls-password=${STLS_PWD}, shadow-tls-version=3, shadow-tls-sni=${STLS_SNI}, tfo=true${RESET}"
+        echo -e "${CYAN}NatSnell = snell,${PUB_IP}, ${STLS_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, shadow-tls-password=${STLS_PWD}, shadow-tls-version=3, shadow-tls-sni=${STLS_SNI}, tfo=true${RESET}"
     else
         echo -e "${CYAN}----------------------------------------${RESET}"
         echo -e "${YELLOW}未配置 ShadowTLS。直连 Egern 配置如下：${RESET}"
-        echo -e "${CYAN}NatSnell = snell, ${PUB_IP}, ${SNELL_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, tfo=true${RESET}"
+        echo -e "${CYAN}NatSnell = snell,${PUB_IP}, ${SNELL_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, tfo=true${RESET}"
     fi
     echo -e "${CYAN}========================================${RESET}"
 }
@@ -323,7 +322,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/shadow-tls --v3 server --listen 0.0.0.0:${STLS_PORT} --server 127.0.0.1:${SNELL_PORT} --tls ${TLS_DOMAIN}:443 --password ${STLS_PWD} --wildcard-sni authed
+ExecStart=/usr/local/bin/shadow-tls --v3 server --listen 0.0.0.0:${STLS_PORT} --server 127.0.0.1:${SNELL_PORT} --tls ${TLS_DOMAIN}:443 --password${STLS_PWD} --wildcard-sni authed
 Restart=always
 RestartSec=3
 
@@ -357,22 +356,4 @@ show_menu() {
     echo -e "${GREEN}6.${RESET} 重启 Snell / ShadowTLS 服务"
     echo -e "${GREEN}7.${RESET} 检查脚本更新"
     echo -e "${GREEN}0.${RESET} 退出脚本"
-    echo -e "${CYAN}========================================${RESET}"
-    read -rp "请输入数字 [0-7]: " num
-}
-
-# === 主循环 ===
-while true; do
-    show_menu
-    case "$num" in
-        1) install_snell; read -rp "按回车键继续..." ;;
-        2) uninstall_snell; read -rp "按回车键继续..." ;;
-        3) setup_shadowtls; read -rp "按回车键继续..." ;;
-        4) uninstall_shadowtls; read -rp "按回车键继续..." ;;
-        5) view_snell_config; read -rp "按回车键继续..." ;;
-        6) restart_snell; read -rp "按回车键继续..." ;;
-        7) auto_update_script; read -rp "按回车键继续..." ;;
-        0) exit 0 ;;
-        *) echo -e "${RED}请输入有效选项！${RESET}"; sleep 1 ;;
-    esac
-done
+    echo -e "${CYAN}================================
