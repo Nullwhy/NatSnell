@@ -141,4 +141,3 @@ EOF
     echo -e "  ${CYAN}下载 Snell 服务端...${RESET}"
     DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-${ARCH_TYPE}.zip"
     wget -q -O /tmp/snell.zip "$DOWNLOAD_URL" || { echo -e "  ${RED}❌ 下载失败${RESET}"; return 1; }
-    
