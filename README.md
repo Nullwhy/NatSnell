@@ -12,16 +12,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSne
 
 Snell 协议是由 Surge 团队设计的一种轻量级、高效的加密代理协议，专注于提供安全、快速的网络传输服务。该协议通过简洁的设计和加密技术，满足用户对隐私保护和高性能传输的需求。
 
-### Snell v4 vs v5 对比
-
-| 特性 | Snell v4 | Snell v5 |
-|------|----------|----------|
-| 状态 | 稳定版 | 最新版 |
-| 安全性 | 支持 | 支持 |
-| QUIC Proxy | 不支持 | 支持 |
-| Dynamic Record Sizing | 不支持 | 支持 |
-| 出口控制 | 不支持 | 支持 |
-
 ### ShadowTLS
 
 ShadowTLS 是一个轻量级的 TLS 伪装工具，可以模拟正常 HTTPS 流量，用于提升连接隐蔽性和稳定性。
