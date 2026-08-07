@@ -353,7 +353,7 @@ show_menu() {
     echo -e "  ${GREEN}2.${RESET} 安装 / 配置 ShadowTLS"
     echo -e "  ${GREEN}3.${RESET} ${BOLD}修改 / 优化系统 DNS${RESET}"
     echo -e "  ${GREEN}4.${RESET} 卸载管理 (Snell / ShadowTLS)"
-    echo -e "  ${GREEN}5.${RESET} 查看配置 & 导出节点字符串"
+    echo -e "  ${GREEN}5.${RESET} 查看配置 / 导出节点字符串"
     echo -e "  ${GREEN}6.${RESET} 重启所有服务"
     echo -e "  ${GREEN}7.${RESET} 检查脚本更新"
     echo -e "  ${RED}0.${RESET} 退出面板"
