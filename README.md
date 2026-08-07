@@ -1,10 +1,12 @@
 [中文](README.md) 
 
-# 只适用于在 Linux 终端（VPS / LXC）中运行
+# 只适用于在 Linux 终端（LXC / NAT VPS）中运行
 
 # NatSnell 一键脚本
 
+```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)
+```
 
 ### ShadowTLS 说明
 
