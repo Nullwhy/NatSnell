@@ -15,8 +15,7 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 current_version="1.0"
-SNELL_VERSION_CHOICE=""
-SNELL_VERSION=""
+SNELL_VERSION="5"
 
 check_status() {
     local service_name=$1
@@ -27,23 +26,6 @@ check_status() {
     else
         echo -e "${YELLOW}◌ 未安装${RESET}"
     fi
-}
-
-select_snell_version() {
-    echo -e "\n${CYAN}${BOLD}[+] 请选择要安装的 Snell 版本：${RESET}"
-    echo -e "  ${GREEN}1.${RESET} Snell v4"
-    echo -e "  ${GREEN}2.${RESET} Snell v5"
-    echo -e "  ${GREEN}3.${RESET} Snell v6 (Beta)"
-
-    while true; do
-        read -rp "  请选择 [1-3]: " version_choice
-        case "$version_choice" in
-            1) SNELL_VERSION_CHOICE="v4"; SNELL_VERSION="4"; echo -e "  ${GREEN}✓ 已选择 Snell v4${RESET}"; break ;;
-            2) SNELL_VERSION_CHOICE="v5"; SNELL_VERSION="5"; echo -e "  ${GREEN}✓ 已选择 Snell v5${RESET}"; break ;;
-            3) SNELL_VERSION_CHOICE="v6"; SNELL_VERSION="6"; echo -e "  ${GREEN}✓ 已选择 Snell v6 (Beta)${RESET}"; break ;;
-            *) echo -e "  ${RED}❌ 无效选项，请重新输入${RESET}" ;;
-        esac
-    done
 }
 
 create_shortcut() {
@@ -59,7 +41,7 @@ auto_update_script() {
         new_version=$(grep "current_version=" "$TMP_SCRIPT" | head -n1 | cut -d'"' -f2)
         if [ "$new_version" != "$current_version" ] && [ -n "$new_version" ]; then
             echo -e "  ${GREEN}★ 发现新版本：v${new_version}${RESET}"
-            cp "$0" "${0}.backup"
+            cp "$0" "${0}.backup" 2>/dev/null
             mv "$TMP_SCRIPT" "$0"
             chmod +x "$0"
             create_shortcut
@@ -75,21 +57,11 @@ auto_update_script() {
     fi
 }
 
-get_ipv6_choice() {
-    IPV6_ENABLE="false"
-    LISTEN_ADDR="0.0.0.0"
-    echo -e "\n${CYAN}[+] 配置网络监听：${RESET}"
-    read -rp "  是否启用 IPv6 监听? [y/N] (默认关闭，适合 NAT/LXC 小鸡): " ipv6_choice
-    case "$ipv6_choice" in
-        [yY]|[yY][eE][sS]) IPV6_ENABLE="true"; LISTEN_ADDR="::0"; echo -e "  ${GREEN}✓ 已启用 IPv6 监听${RESET}" ;;
-        *) IPV6_ENABLE="false"; LISTEN_ADDR="0.0.0.0"; echo -e "  ${GREEN}✓ 已锁定 IPv4 监听 (0.0.0.0)${RESET}" ;;
-    esac
-}
-
 install_dependencies() {
     echo -e "\n${CYAN}正在安装基本依赖...${RESET}"
     if command -v apt-get &>/dev/null; then
-        apt-get update -y >/dev/null 2>&1 && apt-get install -y wget unzip curl jq >/dev/null 2>&1
+        apt-get update -y >/dev/null 2>&1
+        apt-get install -y wget unzip curl jq >/dev/null 2>&1
     elif command -v yum &>/dev/null; then
         yum install -y wget unzip curl jq >/dev/null 2>&1
     fi
@@ -102,8 +74,26 @@ get_public_ip() {
 install_snell() {
     auto_update_script
     install_dependencies
-    select_snell_version
-    get_ipv6_choice
+
+    echo -e "\n${CYAN}[+] 请选择要安装的 Snell 版本：${RESET}"
+    echo -e "  1. Snell v4"
+    echo -e "  2. Snell v5 (推荐)"
+    echo -e "  3. Snell v6 (Beta)"
+    read -rp "  请选择 [1-3, 默认 2]: " v_choice
+    case "$v_choice" in
+        1) SNELL_VERSION="4" ;;
+        3) SNELL_VERSION="6" ;;
+        *) SNELL_VERSION="5" ;;
+    esac
+
+    IPV6_ENABLE="false"
+    LISTEN_ADDR="0.0.0.0"
+    echo -e "\n${CYAN}[+] 配置网络监听：${RESET}"
+    read -rp "  是否启用 IPv6 监听? [y/N] (默认关闭，适合 NAT/LXC): " ipv6_choice
+    if [[ "$ipv6_choice" =~ ^[yY]$ ]]; then
+        IPV6_ENABLE="true"
+        LISTEN_ADDR="::0"
+    fi
 
     SNELL_CONF_DIR="/etc/snell"
     mkdir -p "$SNELL_CONF_DIR"
@@ -119,15 +109,12 @@ install_snell() {
 listen = ${LISTEN_ADDR}:${SNELL_PORT}
 psk = ${SNELL_PSK}
 ipv6 = ${IPV6_ENABLE}
-version = ${SNELL_VERSION:-5}
+version = ${SNELL_VERSION}
 EOF
 
     ARCH=$(uname -m)
-    case "$ARCH" in
-        x86_64) ARCH_TYPE="amd64" ;;
-        aarch64) ARCH_TYPE="aarch64" ;;
-        *) echo -e "  ${RED}❌ 不支持的架构: $ARCH${RESET}"; return 1 ;;
-    esac
+    ARCH_TYPE="amd64"
+    [ "$ARCH" = "aarch64" ] && ARCH_TYPE="aarch64"
 
     echo -e "  ${CYAN}下载 Snell 服务端...${RESET}"
     DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-${ARCH_TYPE}.zip"
@@ -184,56 +171,25 @@ do_uninstall_shadowtls() {
     echo -e "  ${GREEN}✓ ShadowTLS 卸载完成！${RESET}"
 }
 
-clean_shortcut() {
-    if [ ! -f "/etc/systemd/system/snell.service" ] && [ ! -f "/etc/systemd/system/shadowtls.service" ]; then
-        rm -f /usr/local/bin/nsl /usr/local/bin/snell
-    fi
-}
-
 uninstall_menu() {
-    echo -e "\n${CYAN}┌───────────────────────────────────────────────────────┐${RESET}"
-    echo -e "${CYAN}│                   🗑️ 服务卸载管理                     │${RESET}"
-    echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
-    echo -e "  ${GREEN}1.${RESET} 仅卸载 Snell"
-    echo -e "  ${GREEN}2.${RESET} 仅卸载 ShadowTLS"
-    echo -e "  ${RED}3. 全部卸载并清理残留 (彻底删除脚本与服务)${RESET}"
-    echo -e "  ${CYAN}0.${RESET} 返回主菜单"
-    echo -e "${CYAN}└───────────────────────────────────────────────────────┘${RESET}"
-    read -rp "  请选择卸载选项 [0-3]: " un_choice
+    echo -e "\n${CYAN}🗑️ 卸载管理选项：${RESET}"
+    echo -e "  1. 仅卸载 Snell"
+    echo -e "  2. 仅卸载 ShadowTLS"
+    echo -e "  3. 全部彻底卸载"
+    echo -e "  0. 返回"
+    read -rp "  请选择 [0-3]: " un_choice
 
-    case "$un_choice" in
-        1)
-            do_uninstall_snell
-            clean_shortcut
-            systemctl daemon-reload
-            ;;
-        2)
-            do_uninstall_shadowtls
-            clean_shortcut
-            systemctl daemon-reload
-            ;;
-        3)
-            read -rp "  ⚠️ 确定要彻底清空 Snell 和 ShadowTLS 所有相关配置吗? [y/N]: " confirm
-            case "$confirm" in
-                [yY]|[yY][eE][sS])
-                    do_uninstall_snell
-                    do_uninstall_shadowtls
-                    rm -f /usr/local/bin/nsl /usr/local/bin/snell
-                    systemctl daemon-reload
-                    echo -e "  ${GREEN}✓ 已卸载所有服务，清理了全部快捷键与配置文件！${RESET}"
-                    ;;
-                *)
-                    echo -e "  ${YELLOW}已取消卸载操作。${RESET}"
-                    ;;
-            esac
-            ;;
-        0)
-            return 0
-            ;;
-        *)
-            echo -e "  ${RED}❌ 无效选项！${RESET}"
-            ;;
-    esac
+    if [ "$un_choice" = "1" ]; then
+        do_uninstall_snell
+    elif [ "$un_choice" = "2" ]; then
+        do_uninstall_shadowtls
+    elif [ "$un_choice" = "3" ]; then
+        do_uninstall_snell
+        do_uninstall_shadowtls
+        rm -f /usr/local/bin/nsl /usr/local/bin/snell
+        echo -e "  ${GREEN}✓ 已完全清理所有脚本和服务！${RESET}"
+    fi
+    systemctl daemon-reload
 }
 
 view_snell_config() {
@@ -252,10 +208,10 @@ view_snell_config() {
     echo -e "\n${CYAN}┌───────────────────────────────────────────────────────┐${RESET}"
     echo -e "${CYAN}│               📊 当前节点配置卡片                     │${RESET}"
     echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
-    printf "${CYAN}│${RESET}  %-18s : " "公网 IP 地址" ; echo -e "${BOLD}${PUB_IP}${RESET}"
-    printf "${CYAN}│${RESET}  %-18s : " "Snell 内部端口" ; echo -e "${YELLOW}${SNELL_PORT}${RESET}"
-    printf "${CYAN}│${RESET}  %-18s : " "Snell PSK 密钥" ; echo -e "${YELLOW}${SNELL_PSK}${RESET}"
-    printf "${CYAN}│${RESET}  %-18s : " "Snell 协议版本" ; echo -e "${YELLOW}v${SNELL_VER}${RESET}"
+    echo -e "  公网 IP 地址     : ${BOLD}${PUB_IP}${RESET}"
+    echo -e "  Snell 内部端口   : ${YELLOW}${SNELL_PORT}${RESET}"
+    echo -e "  Snell PSK 密钥   : ${YELLOW}${SNELL_PSK}${RESET}"
+    echo -e "  Snell 协议版本   : ${YELLOW}v${SNELL_VER}${RESET}"
 
     if [ -f "/etc/systemd/system/shadowtls.service" ]; then
         STLS_CMD=$(grep -E '^ExecStart' /etc/systemd/system/shadowtls.service)
@@ -265,27 +221,27 @@ view_snell_config() {
         [ -z "$STLS_SNI" ] && STLS_SNI="one-piece.com"
 
         echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
-        printf "${CYAN}│${RESET}  %-18s : " "ShadowTLS 映射端口" ; echo -e "${YELLOW}${STLS_PORT}${RESET} ${PURPLE}(NAT小鸡映射此端口)${RESET}"
-        printf "${CYAN}│${RESET}  %-18s : " "ShadowTLS 密码" ; echo -e "${YELLOW}${STLS_PWD}${RESET}"
-        printf "${CYAN}│${RESET}  %-18s : " "ShadowTLS SNI 域名" ; echo -e "${YELLOW}${STLS_SNI}${RESET}"
+        echo -e "  ShadowTLS 端口   : ${YELLOW}${STLS_PORT}${RESET} ${PURPLE}(NAT小鸡映射此端口)${RESET}"
+        echo -e "  ShadowTLS 密码   : ${YELLOW}${STLS_PWD}${RESET}"
+        echo -e "  ShadowTLS SNI    : ${YELLOW}${STLS_SNI}${RESET}"
         echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
-        echo -e "  ${GREEN}${BOLD}📦 Sub-Store 配置字符串 (双击连带整行复制):${RESET}"
+        echo -e "  ${GREEN}${BOLD}📦 Sub-Store 配置字符串:${RESET}"
         echo -e "  ${YELLOW}NatSnell = snell, ${PUB_IP}, ${STLS_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, shadow-tls-password=${STLS_PWD}, shadow-tls-version=3, shadow-tls-sni=${STLS_SNI}, tfo=true${RESET}"
     else
         echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
-        echo -e "  ${YELLOW}未检测到 ShadowTLS。直连配置：${RESET}"
+        echo -e "  ${YELLOW}直连配置：${RESET}"
         echo -e "  ${YELLOW}NatSnell = snell, ${PUB_IP}, ${SNELL_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, tfo=true${RESET}"
     fi
 
     echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
-    printf "${CYAN}│${RESET}  %-18s : " "终端管理快捷指令" ; echo -e "${GREEN}${BOLD}nsl${RESET} ${PURPLE}(在 VPS 任何位置输入此命令调出菜单)${RESET}"
+    echo -e "  终端管理快捷指令 : ${GREEN}${BOLD}nsl${RESET} ${PURPLE}(在 VPS 任何位置输入此命令调出菜单)${RESET}"
     echo -e "${CYAN}└───────────────────────────────────────────────────────┘${RESET}\n"
 }
 
 restart_snell() {
     systemctl restart snell 2>/dev/null
     systemctl restart shadowtls 2>/dev/null
-    echo -e "\n  ${GREEN}✓ Snell 与 ShadowTLS 服务均已正常重启！${RESET}"
+    echo -e "\n  ${GREEN}✓ 所有服务均已正常重启！${RESET}"
 }
 
 setup_shadowtls() {
@@ -304,7 +260,7 @@ setup_shadowtls() {
     [ -z "$STLS_PWD" ] && STLS_PWD="$DEFAULT_STLS_PWD"
 
     ARCH=$(uname -m)
-    [ "$ARCH" = "x86_64" ] && STLS_ARCH="x86_64-unknown-linux-musl"
+    STLS_ARCH="x86_64-unknown-linux-musl"
     [ "$ARCH" = "aarch64" ] && STLS_ARCH="aarch64-unknown-linux-musl"
 
     echo -e "  ${CYAN}下载 ShadowTLS 服务端...${RESET}"
