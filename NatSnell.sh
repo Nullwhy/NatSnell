@@ -66,6 +66,13 @@ select_snell_version() {
     done
 }
 
+# === 写入快捷指令 /usr/local/bin/nsl ===
+create_shortcut() {
+    echo '#!/bin/bash' > /usr/local/bin/nsl
+    echo 'bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)' >> /usr/local/bin/nsl
+    chmod +x /usr/local/bin/nsl
+}
+
 # === 自动更新脚本 ===
 auto_update_script() {
     echo -e "${CYAN}正在检查脚本更新...${RESET}"
@@ -83,12 +90,7 @@ auto_update_script() {
             mv "$TMP_SCRIPT" "$0"
             chmod +x "$0"
             
-            # 同步更新快捷指令 /usr/local/bin/nsl
-            cat << 'EOFSCRIPT' > /usr/local/bin/nsl
-#!/bin/bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)
-EOFSCRIPT
-            chmod +x /usr/local/bin/nsl
+            create_shortcut
 
             echo -e "${GREEN}脚本已更新到最新版本，请重新运行脚本${RESET}"
             exit 0
@@ -194,12 +196,7 @@ EOF
     systemctl enable snell
     systemctl restart snell
 
-    # 写入快捷指令 nsl
-    cat << 'EOFSCRIPT' > /usr/local/bin/nsl
-#!/bin/bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)
-EOFSCRIPT
-    chmod +x /usr/local/bin/nsl
+    create_shortcut
 
     echo -e "${GREEN}========================================${RESET}"
     echo -e "${GREEN}Snell 安装并启动成功！${RESET}"
@@ -249,7 +246,6 @@ view_snell_config() {
         return 1
     fi
 
-    # 解析 Snell 配置
     SNELL_PSK=$(grep -E '^psk' /etc/snell/snell-server.conf | awk -F'=' '{print $2}' | tr -d ' ')
     SNELL_PORT=$(grep -E '^listen' /etc/snell/snell-server.conf | sed -n 's/.*:\([0-9]*\)/\1/p')
     SNELL_VER=$(grep -E '^version' /etc/snell/snell-server.conf | awk -F'=' '{print $2}' | tr -d ' ')
@@ -265,11 +261,9 @@ view_snell_config() {
     echo -e "Snell PSK 密钥 : ${YELLOW}${SNELL_PSK}${RESET}"
     echo -e "Snell 协议版本 : ${YELLOW}${SNELL_VER}${RESET}"
 
-    # 解析 ShadowTLS 配置（精准匹配模式）
     if [ -f "/etc/systemd/system/shadowtls.service" ]; then
         STLS_CMD=$(grep -E '^ExecStart' /etc/systemd/system/shadowtls.service)
         
-        # 精准提取监听端口、密码和伪装 SNI
         STLS_PORT=$(echo "$STLS_CMD" | sed -n 's/.*--listen [^:]*:\([0-9]*\).*/\1/p')
         STLS_PWD=$(echo "$STLS_CMD" | sed -n 's/.*--password \([^ ]*\).*/\1/p')
         STLS_SNI=$(echo "$STLS_CMD" | sed -n 's/.*--tls \([^:]*\):.*/\1/p')
@@ -282,11 +276,11 @@ view_snell_config() {
         echo -e "ShadowTLS SNI  : ${YELLOW}${STLS_SNI}${RESET}"
         echo -e "${CYAN}----------------------------------------${RESET}"
         echo -e "${GREEN}📱 Egern 节点配置字符串 (直接复制以下文本):${RESET}"
-        echo -e "${CYAN}NatSnell = snell,${PUB_IP}, ${STLS_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, shadow-tls-password=${STLS_PWD}, shadow-tls-version=3, shadow-tls-sni=${STLS_SNI}, tfo=true${RESET}"
+        echo -e "${CYAN}NatSnell = snell, ${PUB_IP}, ${STLS_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, shadow-tls-password=${STLS_PWD}, shadow-tls-version=3, shadow-tls-sni=${STLS_SNI}, tfo=true${RESET}"
     else
         echo -e "${CYAN}----------------------------------------${RESET}"
         echo -e "${YELLOW}未配置 ShadowTLS。直连 Egern 配置如下：${RESET}"
-        echo -e "${CYAN}NatSnell = snell,${PUB_IP}, ${SNELL_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, tfo=true${RESET}"
+        echo -e "${CYAN}NatSnell = snell, ${PUB_IP}, ${SNELL_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, tfo=true${RESET}"
     fi
     echo -e "${CYAN}========================================${RESET}"
 }
@@ -310,7 +304,6 @@ setup_shadowtls() {
     read -rp "请输入伪装域名 (SNI) [默认 one-piece.com]: " TLS_DOMAIN
     [ -z "$TLS_DOMAIN" ] && TLS_DOMAIN="one-piece.com"
 
-    # 自动生成 16 位随机密码作为默认值
     DEFAULT_STLS_PWD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
     read -rp "请输入 ShadowTLS 密码 [默认随机: ${DEFAULT_STLS_PWD}]: " STLS_PWD
     [ -z "$STLS_PWD" ] && STLS_PWD="$DEFAULT_STLS_PWD"
@@ -320,4 +313,66 @@ setup_shadowtls() {
     [ "$ARCH" = "aarch64" ] && STLS_ARCH="aarch64-unknown-linux-musl"
 
     echo -e "${CYAN}正在下载 ShadowTLS 二进制文件...${RESET}"
-    wget -O /usr/local/bin/shadow-tls "
+    wget -O /usr/local/bin/shadow-tls "https://github.com/ihciah/shadow-tls/releases/latest/download/shadow-tls-${STLS_ARCH}" || { echo -e "${RED}下载失败${RESET}"; return 1; }
+    chmod +x /usr/local/bin/shadow-tls
+
+    cat <<EOF > /etc/systemd/system/shadowtls.service
+[Unit]
+Description=Shadow-TLS Service for Snell
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/shadow-tls --v3 server --listen 0.0.0.0:${STLS_PORT} --server 127.0.0.1:${SNELL_PORT} --tls ${TLS_DOMAIN}:443 --password ${STLS_PWD} --wildcard-sni authed
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable shadowtls
+    systemctl restart shadowtls
+
+    echo -e "${GREEN}ShadowTLS 配置成功并已启动！${RESET}"
+    view_snell_config
+}
+
+# === 菜单交互 ===
+show_menu() {
+    clear
+    echo -e "${CYAN}========================================${RESET}"
+    echo -e "${GREEN}   NatSnell 管理脚本 v${current_version} (LXC/NAT 优化版)${RESET}"
+    echo -e "   仓库: Nullwhy/NatSnell | 快捷指令: nsl"
+    echo -e "${CYAN}----------------------------------------${RESET}"
+    echo -n -e "   Snell 状态     : "; check_status "snell"
+    echo -n -e "   ShadowTLS 状态 : "; check_status "shadowtls"
+    echo -e "${CYAN}========================================${RESET}"
+    echo -e "${GREEN}1.${RESET} 安装 Snell"
+    echo -e "${GREEN}2.${RESET} 仅卸载 Snell"
+    echo -e "${GREEN}3.${RESET} 安装/配置 ShadowTLS"
+    echo -e "${GREEN}4.${RESET} 仅卸载 ShadowTLS"
+    echo -e "${GREEN}5.${RESET} 查看配置 & 导出 Egern 节点"
+    echo -e "${GREEN}6.${RESET} 重启 Snell / ShadowTLS 服务"
+    echo -e "${GREEN}7.${RESET} 检查脚本更新"
+    echo -e "${GREEN}0.${RESET} 退出脚本"
+    echo -e "${CYAN}========================================${RESET}"
+    read -rp "请输入数字 [0-7]: " num
+}
+
+# === 主循环 ===
+while true; do
+    show_menu
+    case "$num" in
+        1) install_snell; read -rp "按回车键继续..." ;;
+        2) uninstall_snell; read -rp "按回车键继续..." ;;
+        3) setup_shadowtls; read -rp "按回车键继续..." ;;
+        4) uninstall_shadowtls; read -rp "按回车键继续..." ;;
+        5) view_snell_config; read -rp "按回车键继续..." ;;
+        6) restart_snell; read -rp "按回车键继续..." ;;
+        7) auto_update_script; read -rp "按回车键继续..." ;;
+        0) exit 0 ;;
+        *) echo -e "${RED}请输入有效选项！${RESET}"; sleep 1 ;;
+    esac
+done
