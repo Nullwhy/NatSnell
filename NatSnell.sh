@@ -29,8 +29,10 @@ check_status() {
 }
 
 create_shortcut() {
-    echo '#!/bin/bash' > /usr/local/bin/nsl
-    echo 'bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)' >> /usr/local/bin/nsl
+    cat << 'EOF' > /usr/local/bin/nsl
+#!/bin/bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)
+EOF
     chmod +x /usr/local/bin/nsl
 }
 
@@ -148,7 +150,7 @@ EOF
 
     echo -e "\n${GREEN}=========================================================${RESET}"
     echo -e "${GREEN}  ✓ Snell 服务安装并启动成功！${RESET}"
-    echo -e "  端口: ${YELLOW}${SNELL_PORT}${RESET} \vert{} PSK:${YELLOW}${SNELL_PSK}${RESET}"
+    echo -e "  端口: ${YELLOW}${SNELL_PORT}${RESET} | PSK: ${YELLOW}${SNELL_PSK}${RESET}"
     echo -e "${GREEN}=========================================================${RESET}"
 }
 
@@ -226,11 +228,11 @@ view_snell_config() {
         echo -e "  ShadowTLS SNI    : ${YELLOW}${STLS_SNI}${RESET}"
         echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
         echo -e "  ${GREEN}${BOLD}📦 Sub-Store 配置字符串:${RESET}"
-        echo -e "  ${YELLOW}NatSnell = snell,${PUB_IP}, ${STLS_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, shadow-tls-password=${STLS_PWD}, shadow-tls-version=3, shadow-tls-sni=${STLS_SNI}, tfo=true${RESET}"
+        echo -e "  ${YELLOW}NatSnell = snell, ${PUB_IP}, ${STLS_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, shadow-tls-password=${STLS_PWD}, shadow-tls-version=3, shadow-tls-sni=${STLS_SNI}, tfo=true${RESET}"
     else
         echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
         echo -e "  ${YELLOW}直连配置：${RESET}"
-        echo -e "  ${YELLOW}NatSnell = snell,${PUB_IP}, ${SNELL_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, tfo=true${RESET}"
+        echo -e "  ${YELLOW}NatSnell = snell, ${PUB_IP}, ${SNELL_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, tfo=true${RESET}"
     fi
 
     echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
@@ -274,4 +276,54 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/shadow-tls --v3 server --listen 0.0.0.0:${STLS_PORT} --server 127.0.0.1:${SNELL_PORT} --tls ${TLS_DOMAIN}:443 --password${STLS_PWD} --wildcard-sni authed
+ExecStart=/usr/local/bin/shadow-tls --v3 server --listen 0.0.0.0:${STLS_PORT} --server 127.0.0.1:${SNELL_PORT} --tls ${TLS_DOMAIN}:443 --password ${STLS_PWD} --wildcard-sni authed
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable shadowtls >/dev/null 2>&1
+    systemctl restart shadowtls
+
+    echo -e "  ${GREEN}✓ ShadowTLS 配置成功并已启动！${RESET}"
+    view_snell_config
+}
+
+show_menu() {
+    clear
+    echo -e "${CYAN}=========================================================${RESET}"
+    echo -e "${BOLD}${PURPLE}          NatSnell 管理面板 v${current_version} (LXC / NAT)${RESET}"
+    echo -e "${BLUE}          GitHub: Nullwhy/NatSnell${RESET}"
+    echo -e "${CYAN}=========================================================${RESET}"
+    
+    printf "  %-22s : " "Snell 服务" ; check_status "snell"
+    printf "  %-22s : " "ShadowTLS 伪装" ; check_status "shadowtls"
+    
+    echo -e "${CYAN}---------------------------------------------------------${RESET}"
+    echo -e "  ${GREEN}1.${RESET} 安装 / 重置 Snell"
+    echo -e "  ${GREEN}2.${RESET} 安装 / 配置 ShadowTLS"
+    echo -e "  ${GREEN}3.${RESET} 卸载管理 (Snell / ShadowTLS)"
+    echo -e "  ${GREEN}4.${RESET} ${BOLD}查看配置 & 导出节点字符串${RESET}"
+    echo -e "  ${GREEN}5.${RESET} 重启所有服务"
+    echo -e "  ${GREEN}6.${RESET} 检查脚本更新"
+    echo -e "  ${RED}0.${RESET} 退出面板"
+    echo -e "${CYAN}=========================================================${RESET}"
+    read -rp "  请选择操作 [0-6]: " num
+}
+
+while true; do
+    show_menu
+    case "$num" in
+        1) install_snell; read -rp "  按回车键返回菜单..." ;;
+        2) setup_shadowtls; read -rp "  按回车键返回菜单..." ;;
+        3) uninstall_menu; read -rp "  按回车键返回菜单..." ;;
+        4) view_snell_config; read -rp "  按回车键返回菜单..." ;;
+        5) restart_snell; read -rp "  按回车键返回菜单..." ;;
+        6) auto_update_script; read -rp "  按回车键返回菜单..." ;;
+        0) echo -e "\n  ${GREEN}感谢使用 NatSnell，再见！${RESET}\n"; exit 0 ;;
+        *) echo -e "  ${RED}❌ 请输入有效数字！${RESET}"; sleep 1 ;;
+    esac
+done
