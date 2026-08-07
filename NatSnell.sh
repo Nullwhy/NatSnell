@@ -29,10 +29,10 @@ check_status() {
 }
 
 create_shortcut() {
-    cat << 'EOF' > /usr/local/bin/nsl
+    cat << 'INNER_EOF' > /usr/local/bin/nsl
 #!/bin/bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)
-EOF
+INNER_EOF
     chmod +x /usr/local/bin/nsl
 }
 
@@ -174,7 +174,7 @@ do_uninstall_shadowtls() {
 }
 
 uninstall_menu() {
-    echo -e "\n${CYAN}🗑️ 卸载管理选项：${RESET}"
+    echo -e "\n${CYAN}卸载管理选项：${RESET}"
     echo -e "  1. 仅卸载 Snell"
     echo -e "  2. 仅卸载 ShadowTLS"
     echo -e "  3. 全部彻底卸载"
