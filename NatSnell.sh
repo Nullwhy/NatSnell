@@ -13,7 +13,7 @@ CYAN='\033[0;36m'
 RESET='\033[0m'
 
 # 当前版本号
-current_version="5.7"
+current_version="5.8"
 
 # 全局变量：选择的 Snell 版本
 SNELL_VERSION_CHOICE=""
@@ -218,7 +218,6 @@ uninstall_snell() {
     rm -rf /etc/snell
     rm -f /usr/local/bin/snell-server
     
-    # 如果 ShadowTLS 也不存在，则同时删除快捷命令
     if [ ! -f "/etc/systemd/system/shadowtls.service" ]; then
         rm -f /usr/local/bin/nsl /usr/local/bin/snell
     fi
@@ -235,7 +234,6 @@ uninstall_shadowtls() {
     rm -f /etc/systemd/system/shadowtls.service
     rm -f /usr/local/bin/shadow-tls
     
-    # 如果 Snell 也不存在，则同时删除快捷命令
     if [ ! -f "/etc/systemd/system/snell.service" ]; then
         rm -f /usr/local/bin/nsl /usr/local/bin/snell
     fi
