@@ -1,5 +1,6 @@
 
 # 脚本仅供学习交流，严禁非法用途！造成一切后果与作者无关！
+# This script is intended solely for educational and informational purposes; any illegal use is strictly prohibited. The author bears no responsibility for any consequences arising from its use.
 
 # 只适用于在 Linux 终端（LXC / NAT VPS）中运行
 
