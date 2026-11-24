@@ -1,8 +1,9 @@
+cat <<'EOF' > NatSnell.sh
 #!/bin/bash
 # =========================================================
 # 项目: NatSnell (专为 NAT / LXC 优化版)
 # 仓库: Nullwhy/NatSnell
-# 描述: 用于快速部署与管理 Snell + ShadowTLS 节点，集成 BBR 管理与同网段邻居域名 Top 3 扫描
+# 描述: 用于快速部署与管理 Snell + ShadowTLS 节点，集成 BBR 管理
 # =========================================================
 
 RED='\033[0;31m'
@@ -16,9 +17,6 @@ RESET='\033[0m'
 
 current_version="1.3"
 SNELL_VERSION="5"
-NEIGHBOR_TOP_N=3
-NEIGHBOR_MAX_CANDIDATES=50
-LAST_BEST_SNI=""
 
 BBR_SYSCTL="/etc/sysctl.d/99-snell-bbr.conf"
 BBR_MODULES="/etc/modules-load.d/snell-bbr.conf"
@@ -55,7 +53,7 @@ kernel_at_least() {
     maj=${v%%.*}
     v=${v#*.}
     min=${v%%[!0-9]*}
-    [ "${maj:-0}" -gt "$1" ] \vert{}\vert{} { [ "${maj:-0}" -eq "$1" ] && [ "${min:-0}" -ge "$2" ]; }
+    [ "${maj:-0}" -gt "$1" ] || { [ "${maj:-0}" -eq "$1" ] && [ "${min:-0}" -ge "$2" ]; }
 }
 
 in_container() {
@@ -73,13 +71,13 @@ secure_boot_on() {
     local f
     for f in /sys/firmware/efi/efivars/SecureBoot-*; do
         [ -r "$f" ] || continue
-        [ "$(od -An -t u1 "$f" 2>/dev/null \vert{} awk '{print $NF}')" = "1" ] && return 0
+        [ "$(od -An -t u1 "$f" 2>/dev/null | awk '{print $NF}')" = "1" ] && return 0
     done
     return 1
 }
 
 xanmod_suite_ok() {
-    [ "$(curl -s -o /dev/null -w '\%{http_code}' --max-time 15 "${XANMOD_REPO}/dists/$1/Release")" = "200" ]
+    [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${XANMOD_REPO}/dists/$1/Release")" = "200" ]
 }
 
 xanmod_running() {
@@ -88,7 +86,7 @@ xanmod_running() {
 
 xanmod_installed() {
     command -v dpkg-query >/dev/null 2>&1 && \
-        dpkg-query -W -f='${Status}${Package}\n' 'linux-image-*xanmod*' 2>/dev/null | grep -q '^install ok installed'
+        dpkg-query -W -f='${Status} ${Package}\n' 'linux-image-*xanmod*' 2>/dev/null | grep -q '^install ok installed'
 }
 
 fix_legacy_xanmod_repo() {
@@ -149,21 +147,21 @@ write_bbr_sysctl() {
         for k in $BBR_KEYS; do
             v=$(sysctl -n "$k" 2>/dev/null | tr -s '\t ' '  ')
             [ -n "$v" ] && orig="${orig:+$orig
-}# 原值 ${k} =${v}"
+}# 原值 ${k} = ${v}"
         done
     fi
     mkdir -p "$(dirname "$BBR_SYSCTL")" "$(dirname "$BBR_MODULES")"
     {
         echo "# 由 NatSnell 的 BBR 管理写入。删除本文件并重启（或在菜单里选「恢复默认」）即恢复原来的设置。"
-        [ -n "$orig" ] && printf '\%s\n' "$orig"
-        cat <<'EOF'
+        [ -n "$orig" ] && printf '%s\n' "$orig"
+        cat <<'SYSCTL_EOF'
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 net.core.rmem_max = 33554432
 net.core.wmem_max = 33554432
 net.ipv4.tcp_rmem = 4096 131072 33554432
 net.ipv4.tcp_wmem = 4096 16384 33554432
-EOF
+SYSCTL_EOF
     } > "$BBR_SYSCTL"
     chmod 600 "$BBR_SYSCTL" 2>/dev/null || true
     echo "tcp_bbr" > "$BBR_MODULES"
@@ -260,3 +258,462 @@ xanmod_package() {
 }
 
 install_xanmod() {
+    if [ "$(uname -m)" != "x86_64" ]; then
+        echo -e "  ${RED}❌ XanMod 仅支持 x86_64 架构，当前为 $(uname -m)。${RESET}"
+        return 1
+    fi
+    if ! command -v apt-get >/dev/null 2>&1 || [ ! -f /etc/os-release ]; then
+        echo -e "  ${RED}❌ XanMod 仅支持 Debian / Ubuntu 系统。${RESET}"
+        return 1
+    fi
+    local os_id
+    os_id=$(. /etc/os-release && echo "${ID:-} ${ID_LIKE:-}" | tr '[:upper:]' '[:lower:]')
+    case " $os_id " in
+        *" debian "*|*" ubuntu "*) ;;
+        *) echo -e "  ${RED}❌ XanMod 仅支持 Debian / Ubuntu 系统。${RESET}"; return 1 ;;
+    esac
+    if in_container && [ "${BBR_APT_SIMULATE:-}" != "1" ]; then
+        echo -e "  ${RED}❌ 当前处于容器或 OpenVZ 环境，无法更换宿主机内核。${RESET}"
+        return 1
+    fi
+    if secure_boot_on; then
+        echo -e "  ${RED}❌ 检测到已开启 Secure Boot，安装未签名 XanMod 内核可能导致无法启动。${RESET}"
+        return 1
+    fi
+    for cmd in curl gpg gzip; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo -e "  ${RED}❌ 缺少命令: $cmd，请先安装。${RESET}"
+            return 1
+        fi
+    done
+
+    local codename level pkg ans
+    codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
+    if [ -z "$codename" ] || ! xanmod_suite_ok "$codename"; then
+        echo -e "  ${RED}❌ XanMod 源不支持当前系统版本（${codename:-未知}）。${RESET}"
+        return 1
+    fi
+    level=$(cpu_level)
+    if ! pkg=$(xanmod_package "$level" "$(xanmod_packages "$codename")"); then
+        echo -e "  ${RED}❌ 未找到适配当前 CPU（x86-64-v${level}）的 XanMod 内核包。${RESET}"
+        return 1
+    fi
+
+    echo -e "  ${CYAN}检测到 CPU 级别：x86-64-v${level} → 准备安装 ${pkg} (${codename})${RESET}"
+    read -rp "  确认安装并设为默认启动内核吗？[y/N]: " ans
+    case "$ans" in [yY]*) ;; *) echo -e "  已取消。"; return 0 ;; esac
+
+    mkdir -p "$(dirname "$XANMOD_KEYRING")"
+    if ! curl -fsSL --retry 3 --max-time 60 "$XANMOD_KEY_URL" | gpg --dearmor --yes -o "$XANMOD_KEYRING"; then
+        echo -e "  ${RED}❌ 下载 XanMod 签名密钥失败。${RESET}"
+        return 1
+    fi
+    echo "deb [signed-by=${XANMOD_KEYRING}] ${XANMOD_REPO} ${codename} main" > "$XANMOD_LIST"
+    apt-get update -qq || { echo -e "  ${RED}❌ apt-get update 失败。${RESET}"; return 1; }
+
+    local sim=""
+    [ "${BBR_APT_SIMULATE:-}" = "1" ] && sim="-s"
+    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y $sim "$pkg"; then
+        echo -e "  ${RED}❌ 安装 ${pkg} 失败。${RESET}"
+        return 1
+    fi
+    if [ -n "$sim" ]; then
+        echo -e "  ${YELLOW}（模拟安装完成，未实际修改内核）${RESET}"
+        return 0
+    fi
+
+    cleanup_legacy_sysctl
+    write_bbr_sysctl
+    echo -e "  ${GREEN}✓ ${pkg} 安装完成，重启后启用新内核与 BBR v3。${RESET}"
+    read -rp "  是否立即重启系统？[y/N]: " ans
+    case "$ans" in [yY]*) reboot ;; esac
+}
+
+reset_bbr() {
+    if [ ! -f "$BBR_SYSCTL" ] && [ ! -f "$BBR_MODULES" ]; then
+        echo -e "  ${YELLOW}本脚本尚未写入过 BBR 配置。${RESET}"
+        return 0
+    fi
+    local orig="" line
+    [ -f "$BBR_SYSCTL" ] && orig=$(sed -n 's/^# 原值 //p' "$BBR_SYSCTL")
+    rm -f "$BBR_SYSCTL" "$BBR_MODULES"
+    if [ -n "$orig" ]; then
+        printf '%s\n' "$orig" | while IFS= read -r line; do
+            sysctl -w "${line%% = *}=${line#* = }" >/dev/null 2>&1 || true
+        done
+    else
+        sysctl -w net.ipv4.tcp_congestion_control=cubic >/dev/null 2>&1 || true
+    fi
+    sysctl --system >/dev/null 2>&1 || true
+    echo -e "  ${GREEN}✓ 已移除本脚本的 BBR 配置，当前拥塞控制：$(current_cc)${RESET}"
+}
+
+bbr_menu() {
+    local b_choice
+    fix_legacy_xanmod_repo
+    while true; do
+        echo -e "\n${CYAN}── BBR 管理 ──────────────────────────────────────────${RESET}"
+        show_bbr_status
+        echo -e "${CYAN}──────────────────────────────────────────────────────${RESET}"
+        echo -e "  ${GREEN}1.${RESET} 启用 BBR（内核自带）"
+        echo -e "  ${GREEN}2.${RESET} 安装 XanMod 内核（BBR v3，Debian / Ubuntu x86_64）"
+        echo -e "  ${GREEN}3.${RESET} 恢复默认（移除本脚本写入的 BBR 配置）"
+        echo -e "  ${RED}0.${RESET} 返回主菜单"
+        read -rp "  请选择操作 [0-3]: " b_choice
+        case "$b_choice" in
+            1) enable_bbr; read -rp "  按回车键继续..." ;;
+            2) install_xanmod; read -rp "  按回车键继续..." ;;
+            3) reset_bbr; read -rp "  按回车键继续..." ;;
+            0) return 0 ;;
+            *) echo -e "  ${RED}❌ 请输入有效数字！${RESET}"; sleep 1 ;;
+        esac
+    done
+}
+
+create_shortcut() {
+    cat << 'INNER_EOF' > /usr/local/bin/nsl
+#!/bin/bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh)
+INNER_EOF
+    chmod +x /usr/local/bin/nsl
+}
+
+auto_update_script() {
+    echo -e "\n${CYAN}正在检查脚本更新...${RESET}"
+    TMP_SCRIPT=$(mktemp)
+    if curl -sL https://raw.githubusercontent.com/Nullwhy/NatSnell/main/NatSnell.sh -o "$TMP_SCRIPT"; then
+        new_version=$(grep "current_version=" "$TMP_SCRIPT" | head -n1 | cut -d'"' -f2)
+        if [ "$new_version" != "$current_version" ] && [ -n "$new_version" ]; then
+            echo -e "  ${GREEN}★ 发现新版本：v${new_version}${RESET}"
+            cp "$0" "${0}.backup" 2>/dev/null
+            mv "$TMP_SCRIPT" "$0"
+            chmod +x "$0"
+            create_shortcut
+            echo -e "  ${GREEN}✓ 脚本已更新完成，请重新运行${RESET}"
+            exit 0
+        else
+            echo -e "  ${GREEN}✓ 当前已是最新版本 (v${current_version})${RESET}"
+            rm -f "$TMP_SCRIPT"
+        fi
+    else
+        echo -e "  ${RED}❌ 检查更新失败，请检查网络${RESET}"
+        rm -f "$TMP_SCRIPT"
+    fi
+}
+
+install_dependencies() {
+    echo -e "\n${CYAN}正在安装基本依赖...${RESET}"
+    if command -v apt-get &>/dev/null; then
+        apt-get update -y >/dev/null 2>&1
+        apt-get install -y wget unzip curl jq >/dev/null 2>&1
+    elif command -v yum &>/dev/null; then
+        yum install -y wget unzip curl jq >/dev/null 2>&1
+    fi
+}
+
+get_public_ip() {
+    PUB_IP=$(curl -s4 https://api.ipify.org || curl -s4 https://ip.sb || echo "你的公网IP")
+}
+
+set_system_dns() {
+    echo -e "\n${CYAN}[+] 修改系统 DNS 解析服务器：${RESET}"
+    echo -e "  1. Google DNS (8.8.8.8 / 8.8.4.4)"
+    echo -e "  2. Cloudflare DNS (1.1.1.1 / 1.0.0.1)"
+    echo -e "  3. Quad9 DNS (9.9.9.9 / 149.112.112.112)"
+    echo -e "  4. 自定义 DNS"
+    echo -e "  0. 返回主菜单"
+    read -rp "  请选择 [0-4]: " dns_choice
+
+    case "$dns_choice" in
+        1) dns1="8.8.8.8"; dns2="8.8.4.4" ;;
+        2) dns1="1.1.1.1"; dns2="1.0.0.1" ;;
+        3) dns1="9.9.9.9"; dns2="149.112.112.112" ;;
+        4)
+            read -rp "  请输入首选 DNS (例如 8.8.8.8): " dns1
+            read -rp "  请输入备用 DNS (可选，留空跳过): " dns2
+            ;;
+        0) return ;;
+        *) echo -e "  ${RED}❌ 输入无效${RESET}"; return ;;
+    esac
+
+    if [ -n "$dns1" ]; then
+        chattr -i /etc/resolv.conf 2>/dev/null
+        cat <<RESOLV_EOF > /etc/resolv.conf
+nameserver $dns1
+RESOLV_EOF
+        [ -n "$dns2" ] && echo "nameserver $dns2" >> /etc/resolv.conf
+        echo -e "  ${GREEN}✓ 系统 DNS 已成功修改为: $dns1 ${dns2:+$dns2}${RESET}"
+    fi
+}
+
+install_snell() {
+    auto_update_script
+    install_dependencies
+
+    echo -e "\n${CYAN}[+] 请选择要安装的 Snell 版本：${RESET}"
+    echo -e "  1. Snell v4"
+    echo -e "  2. Snell v5 (推荐)"
+    echo -e "  3. Snell v6 (Beta)"
+    read -rp "  请选择 [1-3, 默认 2]: " v_choice
+    case "$v_choice" in
+        1) SNELL_VERSION="4" ;;
+        3) SNELL_VERSION="6" ;;
+        *) SNELL_VERSION="5" ;;
+    esac
+
+    IPV6_ENABLE="false"
+    LISTEN_ADDR="0.0.0.0"
+    echo -e "\n${CYAN}[+] 配置网络监听：${RESET}"
+    read -rp "  是否启用 IPv6 监听? [y/N] (默认关闭，适合 NAT/LXC): " ipv6_choice
+    if [[ "$ipv6_choice" =~ ^[yY]$ ]]; then
+        IPV6_ENABLE="true"
+        LISTEN_ADDR="::0"
+    fi
+
+    SNELL_CONF_DIR="/etc/snell"
+    mkdir -p "$SNELL_CONF_DIR"
+
+    echo -e "\n${CYAN}[+] 配置 Snell 参数：${RESET}"
+    read -rp "  请输入 Snell 内部监听端口 [默认 50001]: " SNELL_PORT
+    [ -z "$SNELL_PORT" ] && SNELL_PORT="50001"
+
+    SNELL_PSK=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+
+    cat <<CONF_EOF > "$SNELL_CONF_DIR/snell-server.conf"
+[snell-server]
+listen = ${LISTEN_ADDR}:${SNELL_PORT}
+psk = ${SNELL_PSK}
+version = ${SNELL_VERSION}
+CONF_EOF
+
+    if [ "$SNELL_VERSION" != "6" ]; then
+        echo "ipv6 = ${IPV6_ENABLE}" >> "$SNELL_CONF_DIR/snell-server.conf"
+    fi
+
+    ARCH=$(uname -m)
+    ARCH_TYPE="amd64"
+    [ "$ARCH" = "aarch64" ] && ARCH_TYPE="aarch64"
+
+    if [ "$SNELL_VERSION" = "4" ]; then
+        DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v4.0.1-linux-${ARCH_TYPE}.zip"
+    elif [ "$SNELL_VERSION" = "5" ]; then
+        DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v5.0.1-linux-${ARCH_TYPE}.zip"
+    elif [ "$SNELL_VERSION" = "6" ]; then
+        DOWNLOAD_URL="https://dl.nssurge.com/snell/snell-server-v6.0.0b4-linux-${ARCH_TYPE}.zip"
+    fi
+
+    echo -e "  ${CYAN}下载 Snell v${SNELL_VERSION} 服务端...${RESET}"
+    wget -q -O /tmp/snell.zip "$DOWNLOAD_URL" || { echo -e "  ${RED}❌ 下载失败${RESET}"; return 1; }
+
+    unzip -q -o /tmp/snell.zip -d /usr/local/bin/
+    chmod +x /usr/local/bin/snell-server
+    rm -f /tmp/snell.zip
+
+    cat <<SERVICE_EOF > /etc/systemd/system/snell.service
+[Unit]
+Description=Snell Server Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/snell-server -c /etc/snell/snell-server.conf
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+    systemctl daemon-reload
+    systemctl enable snell >/dev/null 2>&1
+    systemctl restart snell
+
+    create_shortcut
+
+    echo -e "\n${GREEN}=========================================================${RESET}"
+    echo -e "${GREEN}  ✓ Snell v${SNELL_VERSION} 服务安装并启动成功！${RESET}"
+    echo -e "  端口: ${YELLOW}${SNELL_PORT}${RESET} | PSK: ${YELLOW}${SNELL_PSK}${RESET}"
+    echo -e "${GREEN}=========================================================${RESET}"
+}
+
+do_uninstall_snell() {
+    echo -e "  ${YELLOW}正在清理并卸载 Snell...${RESET}"
+    systemctl stop snell 2>/dev/null
+    systemctl disable snell 2>/dev/null
+    rm -f /etc/systemd/system/snell.service
+    rm -rf /etc/snell
+    rm -f /usr/local/bin/snell-server
+    echo -e "  ${GREEN}✓ Snell 卸载完成！${RESET}"
+}
+
+do_uninstall_shadowtls() {
+    echo -e "  ${YELLOW}正在清理并卸载 ShadowTLS...${RESET}"
+    systemctl stop shadowtls 2>/dev/null
+    systemctl disable shadowtls 2>/dev/null
+    rm -f /etc/systemd/system/shadowtls.service
+    rm -f /usr/local/bin/shadow-tls
+    echo -e "  ${GREEN}✓ ShadowTLS 卸载完成！${RESET}"
+}
+
+uninstall_menu() {
+    echo -e "\n${CYAN}卸载管理选项：${RESET}"
+    echo -e "  1. 仅卸载 Snell"
+    echo -e "  2. 仅卸载 ShadowTLS"
+    echo -e "  3. 全部彻底卸载"
+    echo -e "  0. 返回"
+    read -rp "  请选择 [0-3]: " un_choice
+
+    if [ "$un_choice" = "1" ]; then
+        do_uninstall_snell
+    elif [ "$un_choice" = "2" ]; then
+        do_uninstall_shadowtls
+    elif [ "$un_choice" = "3" ]; then
+        do_uninstall_snell
+        do_uninstall_shadowtls
+        rm -f /usr/local/bin/nsl /usr/local/bin/snell
+        echo -e "  ${GREEN}✓ 已完全清理所有脚本和服务！${RESET}"
+    fi
+    systemctl daemon-reload
+}
+
+view_snell_config() {
+    if [ ! -f "/etc/snell/snell-server.conf" ]; then
+        echo -e "\n${RED}❌ 未找到 Snell 配置文件，请先安装 Snell！${RESET}"
+        return 1
+    fi
+
+    SNELL_PSK=$(grep -E '^psk' /etc/snell/snell-server.conf | awk -F'=' '{print $2}' | tr -d ' ')
+    SNELL_PORT=$(grep -E '^listen' /etc/snell/snell-server.conf | sed -n 's/.*:\([0-9]*\)/\1/p')
+    SNELL_VER=$(grep -E '^version' /etc/snell/snell-server.conf | awk -F'=' '{print $2}' | tr -d ' ')
+    [ -z "$SNELL_VER" ] && SNELL_VER="5"
+
+    get_public_ip
+
+    echo -e "\n${CYAN}┌───────────────────────────────────────────────────────┐${RESET}"
+    echo -e "${CYAN}│               📊 当前节点配置卡片                     │${RESET}"
+    echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
+    echo -e "  公网 IP 地址     : ${BOLD}${PUB_IP}${RESET}"
+    echo -e "  Snell 内部端口   : ${YELLOW}${SNELL_PORT}${RESET}"
+    echo -e "  Snell PSK 密钥   : ${YELLOW}${SNELL_PSK}${RESET}"
+    echo -e "  Snell 协议版本   : ${YELLOW}v${SNELL_VER}${RESET}"
+
+    if [ -f "/etc/systemd/system/shadowtls.service" ]; then
+        STLS_CMD=$(grep -E '^ExecStart' /etc/systemd/system/shadowtls.service)
+        STLS_PORT=$(echo "$STLS_CMD" | sed -n 's/.*--listen [^:]*:\([0-9]*\).*/\1/p')
+        STLS_PWD=$(echo "$STLS_CMD" | sed -n 's/.*--password \([^ ]*\).*/\1/p')
+        STLS_SNI=$(echo "$STLS_CMD" | sed -n 's/.*--tls \([^:]*\):.*/\1/p')
+        [ -z "$STLS_SNI" ] && STLS_SNI="microsoft.com"
+
+        echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
+        echo -e "  ShadowTLS 端口   : ${YELLOW}${STLS_PORT}${RESET} ${PURPLE}(NAT小鸡映射此端口)${RESET}"
+        echo -e "  ShadowTLS 密码   : ${YELLOW}${STLS_PWD}${RESET}"
+        echo -e "  ShadowTLS SNI    : ${YELLOW}${STLS_SNI}${RESET}"
+        echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
+        echo -e "  ${GREEN}${BOLD}📦 Sub-Store 配置字符串:${RESET}"
+        echo -e "  ${YELLOW}NatSnell = snell, ${PUB_IP}, ${STLS_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, shadow-tls-password=${STLS_PWD}, shadow-tls-version=3, shadow-tls-sni=${STLS_SNI}, tfo=true${RESET}"
+    else
+        echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
+        echo -e "  ${YELLOW}直连配置：${RESET}"
+        echo -e "  ${YELLOW}NatSnell = snell, ${PUB_IP}, ${SNELL_PORT}, version=${SNELL_VER}, psk=${SNELL_PSK}, tfo=true${RESET}"
+    fi
+
+    echo -e "${CYAN}├───────────────────────────────────────────────────────┤${RESET}"
+    echo -e "  终端管理快捷指令 : ${GREEN}${BOLD}nsl${RESET} ${PURPLE}(在 VPS 任何位置输入此命令调出菜单)${RESET}"
+    echo -e "${CYAN}└───────────────────────────────────────────────────────┘${RESET}\n"
+}
+
+restart_snell() {
+    systemctl restart snell 2>/dev/null
+    systemctl restart shadowtls 2>/dev/null
+    echo -e "\n  ${GREEN}✓ 所有服务均已正常重启！${RESET}"
+}
+
+setup_shadowtls() {
+    echo -e "\n${CYAN}[+] 配置 ShadowTLS 伪装层：${RESET}"
+    read -rp "  请输入 ShadowTLS 监听端口 [默认 50002]: " STLS_PORT
+    [ -z "$STLS_PORT" ] && STLS_PORT="50002"
+
+    read -rp "  请输入转发的目标 Snell 内部端口 [默认 50001]: " SNELL_PORT
+    [ -z "$SNELL_PORT" ] && SNELL_PORT="50001"
+
+    read -rp "  请输入伪装域名 (SNI) [默认 microsoft.com]: " TLS_DOMAIN
+    [ -z "$TLS_DOMAIN" ] && TLS_DOMAIN="microsoft.com"
+
+    DEFAULT_STLS_PWD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+    read -rp "  请输入 ShadowTLS 密码 [默认随机: ${DEFAULT_STLS_PWD}]: " STLS_PWD
+    [ -z "$STLS_PWD" ] && STLS_PWD="$DEFAULT_STLS_PWD"
+
+    ARCH=$(uname -m)
+    STLS_ARCH="x86_64-unknown-linux-musl"
+    [ "$ARCH" = "aarch64" ] && STLS_ARCH="aarch64-unknown-linux-musl"
+
+    echo -e "  ${CYAN}下载 ShadowTLS 服务端...${RESET}"
+    wget -q -O /usr/local/bin/shadow-tls "https://github.com/ihciah/shadow-tls/releases/latest/download/shadow-tls-${STLS_ARCH}" || { echo -e "  ${RED}❌ 下载失败${RESET}"; return 1; }
+    chmod +x /usr/local/bin/shadow-tls
+
+    cat <<STLS_EOF > /etc/systemd/system/shadowtls.service
+[Unit]
+Description=Shadow-TLS Service for Snell
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/shadow-tls --v3 server --listen 0.0.0.0:${STLS_PORT} --server 127.0.0.1:${SNELL_PORT} --tls ${TLS_DOMAIN}:443 --password ${STLS_PWD} --wildcard-sni authed
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+STLS_EOF
+
+    systemctl daemon-reload
+    systemctl enable shadowtls >/dev/null 2>&1
+    systemctl restart shadowtls
+
+    echo -e "  ${GREEN}✓ ShadowTLS 配置成功并已启动！${RESET}"
+    view_snell_config
+}
+
+show_menu() {
+    clear
+    echo -e "${CYAN}=========================================================${RESET}"
+    echo -e "${BOLD}${GREEN}          NatSnell 管理面板 v${current_version} (LXC / NAT)${RESET}"
+    echo -e "${PURPLE}          GitHub: Nullwhy/NatSnell${RESET}"
+    echo -e "${CYAN}=========================================================${RESET}"
+
+    printf "  %-22s : " "Snell 服务" ; check_status "snell"
+    printf "  %-22s : " "ShadowTLS 伪装" ; check_status "shadowtls"
+    printf "  %-22s : " "TCP BBR" ; get_bbr_menu_status
+    printf "  %-22s : ${YELLOW}%s${RESET}\n" "系统 DNS" "$(get_current_dns)"
+
+    echo -e "${CYAN}---------------------------------------------------------${RESET}"
+    echo -e "  ${GREEN}1.${RESET} 安装 / 重置 Snell"
+    echo -e "  ${GREEN}2.${RESET} 安装 / 配置 ShadowTLS"
+    echo -e "  ${GREEN}3.${RESET} ${BOLD}修改 / 优化系统 DNS${RESET}"
+    echo -e "  ${GREEN}4.${RESET} 卸载管理 (Snell / ShadowTLS)"
+    echo -e "  ${GREEN}5.${RESET} 查看配置 / 导出节点字符串"
+    echo -e "  ${GREEN}6.${RESET} 重启所有服务"
+    echo -e "  ${GREEN}7.${RESET} 检查脚本更新"
+    echo -e "  ${GREEN}8.${RESET} ${BOLD}BBR 管理 (启用 BBR / XanMod)${RESET}"
+    echo -e "  ${RED}0.${RESET} 退出面板"
+    echo -e "${CYAN}=========================================================${RESET}"
+    read -rp "  请选择操作 [0-8]: " num
+}
+
+while true; do
+    show_menu
+    case "$num" in
+        1) install_snell; read -rp "  按回车键返回菜单..." ;;
+        2) setup_shadowtls; read -rp "  按回车键返回菜单..." ;;
+        3) set_system_dns; read -rp "  按回车键返回菜单..." ;;
+        4) uninstall_menu; read -rp "  按回车键返回菜单..." ;;
+        5) view_snell_config; read -rp "  按回车键返回菜单..." ;;
+        6) restart_snell; read -rp "  按回车键返回菜单..." ;;
+        7) auto_update_script; read -rp "  按回车键返回菜单..." ;;
+        8) bbr_menu ;;
+        0) echo -e "\n  ${GREEN}感谢使用 NatSnell，再见！${RESET}\n"; exit 0 ;;
+        *) echo -e "  ${RED}❌ 请输入有效数字！${RESET}"; sleep 1 ;;
+    esac
+done
+EOF
