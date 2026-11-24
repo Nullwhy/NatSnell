@@ -1,4 +1,3 @@
-cat <<'EOF' > NatSnell.sh
 #!/bin/bash
 # =========================================================
 # 项目: NatSnell (专为 NAT / LXC 优化版)
@@ -716,4 +715,3 @@ while true; do
         *) echo -e "  ${RED}❌ 请输入有效数字！${RESET}"; sleep 1 ;;
     esac
 done
-EOF
